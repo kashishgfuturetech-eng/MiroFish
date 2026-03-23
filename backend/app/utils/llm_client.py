@@ -12,7 +12,7 @@ from ..config import Config
 
 
 class LLMClient:
-    """LLM客户端"""
+    #LLM客户端
     
     def __init__(
         self,
@@ -39,8 +39,9 @@ class LLMClient:
         max_tokens: int = 4096,
         response_format: Optional[Dict] = None
     ) -> str:
+        
         """
-        发送聊天请求
+        .....发送聊天请求
         
         Args:
             messages: 消息列表
@@ -49,7 +50,7 @@ class LLMClient:
             response_format: 响应格式（如JSON模式）
             
         Returns:
-            模型响应文本
+            模型响应文本......
         """
         kwargs = {
             "model": self.model,
@@ -67,7 +68,7 @@ class LLMClient:
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         return content
     """
-    def chat_json(
+    ....def chat_json(
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.3,
@@ -101,7 +102,8 @@ class LLMClient:
         try:
             return json.loads(cleaned_response)
         except json.JSONDecodeError:
-            raise ValueError(f"LLM返回的JSON格式无效: {cleaned_response}")"""
+            raise ValueError(f"LLM返回的JSON格式无效: {cleaned_response}")....."""
+    
     def chat_json(
         self,
         messages: List[Dict[str, str]],
