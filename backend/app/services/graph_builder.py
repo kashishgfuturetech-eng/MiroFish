@@ -109,7 +109,7 @@ class GraphBuilderService:
                 task_id,
                 status=TaskStatus.PROCESSING,
                 progress=5,
-                message="开始构建图谱..."
+                message="Starting graph building..."
             )
             
             # 1. 创建图谱
@@ -117,7 +117,7 @@ class GraphBuilderService:
             self.task_manager.update_task(
                 task_id,
                 progress=10,
-                message=f"图谱已创建: {graph_id}"
+                message=f"graph created: {graph_id}"
             )
             
             # 2. 设置本体
@@ -125,7 +125,7 @@ class GraphBuilderService:
             self.task_manager.update_task(
                 task_id,
                 progress=15,
-                message="本体已设置"
+                message="Ontology set"
             )
             
             # 3. 文本分块
@@ -134,7 +134,7 @@ class GraphBuilderService:
             self.task_manager.update_task(
                 task_id,
                 progress=20,
-                message=f"文本已分割为 {total_chunks} 个块"
+                message=f"text split into {total_chunks} chunks"
             )
             
             # 4. 分批发送数据
