@@ -222,7 +222,7 @@ class SimulationManager:
         )
         
         self._save_simulation_state(state)
-        logger.info(f"创建模拟: {simulation_id}, project={project_id}, graph={graph_id}")
+        logger.info(f"create simulation: {simulation_id}, project={project_id}, graph={graph_id}")
         
         return state
     
@@ -260,7 +260,7 @@ class SimulationManager:
         """
         state = self._load_simulation_state(simulation_id)
         if not state:
-            raise ValueError(f"模拟不存在: {simulation_id}")
+            raise ValueError(f"simulation does not exist: {simulation_id}")
         
         try:
             state.status = SimulationStatus.PREPARING
@@ -270,12 +270,12 @@ class SimulationManager:
             
             # ========== 阶段1: 读取并过滤实体 ==========
             if progress_callback:
-                progress_callback("reading", 0, "正在连接Zep图谱...")
+                progress_callback("reading", 0, "connecting to Zep map...")
             
             reader = ZepEntityReader()
             
             if progress_callback:
-                progress_callback("reading", 30, "正在读取节点数据...")
+                progress_callback("reading", 30, "reading node data...")
             
             filtered = reader.filter_defined_entities(
                 graph_id=state.graph_id,
@@ -289,14 +289,14 @@ class SimulationManager:
             if progress_callback:
                 progress_callback(
                     "reading", 100, 
-                    f"完成，共 {filtered.filtered_count} 个实体",
+                    f"complete，total {filtered.filtered_count} entities",
                     current=filtered.filtered_count,
                     total=filtered.filtered_count
                 )
             
             if filtered.filtered_count == 0:
                 state.status = SimulationStatus.FAILED
-                state.error = "没有找到符合条件的实体，请检查图谱是否正确构建"
+                state.error = "no entity matching the criteria was found，please check if graph construced correctly"
                 self._save_simulation_state(state)
                 return state
             
@@ -306,7 +306,7 @@ class SimulationManager:
             if progress_callback:
                 progress_callback(
                     "generating_profiles", 0, 
-                    "开始生成...",
+                    "start generating...",
                     current=0,
                     total=total_entities
                 )
@@ -352,7 +352,7 @@ class SimulationManager:
             if progress_callback:
                 progress_callback(
                     "generating_profiles", 95, 
-                    "保存Profile文件...",
+                    "save the Profile file...",
                     current=total_entities,
                     total=total_entities
                 )
@@ -375,7 +375,7 @@ class SimulationManager:
             if progress_callback:
                 progress_callback(
                     "generating_profiles", 100, 
-                    f"完成，共 {len(profiles)} 个Profile",
+                    f"complete，totaling {len(profiles)} 个Profile",
                     current=len(profiles),
                     total=len(profiles)
                 )
@@ -394,7 +394,7 @@ class SimulationManager:
             if progress_callback:
                 progress_callback(
                     "generating_config", 30, 
-                    "正在调用LLM生成配置...",
+                    "Invoking LLM to generate config...",
                     current=1,
                     total=3
                 )
@@ -413,7 +413,7 @@ class SimulationManager:
             if progress_callback:
                 progress_callback(
                     "generating_config", 70, 
-                    "正在保存配置文件...",
+                    "saving config. file...",
                     current=2,
                     total=3
                 )
@@ -429,7 +429,7 @@ class SimulationManager:
             if progress_callback:
                 progress_callback(
                     "generating_config", 100, 
-                    "配置生成完成",
+                    "generation complete",
                     current=3,
                     total=3
                 )
@@ -441,13 +441,13 @@ class SimulationManager:
             state.status = SimulationStatus.READY
             self._save_simulation_state(state)
             
-            logger.info(f"模拟准备完成: {simulation_id}, "
+            logger.info(f"simulation preparation complete: {simulation_id}, "
                        f"entities={state.entities_count}, profiles={state.profiles_count}")
             
             return state
             
         except Exception as e:
-            logger.error(f"模拟准备失败: {simulation_id}, error={str(e)}")
+            logger.error(f"simulation preparation failed: {simulation_id}, error={str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             state.status = SimulationStatus.FAILED
@@ -481,7 +481,7 @@ class SimulationManager:
         """获取模拟的Agent Profile"""
         state = self._load_simulation_state(simulation_id)
         if not state:
-            raise ValueError(f"模拟不存在: {simulation_id}")
+            raise ValueError(f"simulation does not exist: {simulation_id}")
         
         sim_dir = self._get_simulation_dir(simulation_id)
         profile_path = os.path.join(sim_dir, f"{platform}_profiles.json")
@@ -519,10 +519,10 @@ class SimulationManager:
                 "parallel": f"python {scripts_dir}/run_parallel_simulation.py --config {config_path}",
             },
             "instructions": (
-                f"1. 激活conda环境: conda activate MiroFish\n"
-                f"2. 运行模拟 (脚本位于 {scripts_dir}):\n"
-                f"   - 单独运行Twitter: python {scripts_dir}/run_twitter_simulation.py --config {config_path}\n"
-                f"   - 单独运行Reddit: python {scripts_dir}/run_reddit_simulation.py --config {config_path}\n"
-                f"   - 并行运行双平台: python {scripts_dir}/run_parallel_simulation.py --config {config_path}"
+                f"1. activate the conda environment: conda activate MiroFish\n"
+                f"2. run the simulation (script are located in {scripts_dir}):\n"
+                f"   - runninf Twitter indepandantlu: python {scripts_dir}/run_twitter_simulation.py --config {config_path}\n"
+                f"   - running Reddit: python {scripts_dir}/run_reddit_simulation.py --config {config_path}\n"
+                f"   - parallel execution on dual platform: python {scripts_dir}/run_parallel_simulation.py --config {config_path}"
             )
         }
