@@ -1803,7 +1803,7 @@ class ReportAgent:
         
         system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
             simulation_requirement=self.simulation_requirement,
-            report_content=report_content if report_content else "（nonereport）",,
+            report_content=report_content if report_content else "（nonereport）",
             tools_description=self._get_tools_description(),
         )
 
