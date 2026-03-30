@@ -151,7 +151,7 @@ class GraphBuilderService:
             self.task_manager.update_task(
                 task_id,
                 progress=60,
-                message="等待Zep处理数据..."
+                message="Waiting for Zep to process data..."
             )
             
             self._wait_for_episodes(
@@ -167,7 +167,7 @@ class GraphBuilderService:
             self.task_manager.update_task(
                 task_id,
                 progress=90,
-                message="获取图谱信息..."
+                message="get map information..."
             )
             
             graph_info = self._get_graph_info(graph_id)
