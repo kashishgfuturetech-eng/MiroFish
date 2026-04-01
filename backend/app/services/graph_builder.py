@@ -216,10 +216,18 @@ class GraphBuilderService:
                 return f"entity_{attr_name}"
             return attr_name
         
+        def to_pascal_case(s: str) -> str:
+            """Convert any string to PascalCase for Zep entity types"""
+            import re
+            if not s:
+                return "Entity"
+            words = re.split(r'[^a-zA-Z0-9]+', s)
+            return ''.join(word.capitalize() for word in words if word) or "Entity"
+        
         # Dynamically create entity types
         entity_types = {}
         for entity_def in ontology.get("entity_types", []):
-            name = entity_def["name"]
+            name = to_pascal_case(entity_def["name"])
             description = entity_def.get("description", f"A {name} entity.")
             
             # Create attribute dict and type annotations (required for Pydantic v2)
@@ -260,7 +268,7 @@ class GraphBuilderService:
             attrs["__annotations__"] = annotations
             
             # Dynamically create class
-            class_name = ''.join(word.capitalize() for word in name.split('_'))
+            class_name = to_pascal_case(name)
             edge_class = type(class_name, (EdgeModel,), attrs)
             edge_class.__doc__ = description
             
@@ -269,10 +277,10 @@ class GraphBuilderService:
             for st in edge_def.get("source_targets", []):
                 source_targets.append(
                     EntityEdgeSourceTarget(
-                        source=st.get("source", "Entity"),
-                        target=st.get("target", "Entity")
+                        source=to_pascal_case(st.get("source", "Entity")),
+                        target=to_pascal_case(st.get("target", "Entity"))
                     )
-                )
+                    )
             
             if source_targets:
                 edge_definitions[name] = (edge_class, source_targets)
