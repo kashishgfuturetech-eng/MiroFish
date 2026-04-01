@@ -529,6 +529,7 @@ const renderGraph3D = async () => {
   const vel = {}
   const uuids = nodesData.map(n => n.uuid)
 
+  // Random initial positions
   uuids.forEach(id => {
     pos[id] = new THREE.Vector3(
       (Math.random() - 0.5) * spread,
@@ -544,30 +545,9 @@ const renderGraph3D = async () => {
     e.source_node_uuid !== e.target_node_uuid
   )
 
-  // Force-directed layout iterations
-  for (let iter = 0; iter < 100; iter++) {
-    for (let i = 0; i < uuids.length; i++) {
-      for (let j = i + 1; j < uuids.length; j++) {
-        const a = uuids[i], b = uuids[j]
-        const diff = pos[a].clone().sub(pos[b])
-        const lenSq = Math.max(diff.lengthSq(), 1)
-        const f = diff.normalize().multiplyScalar(9000 / lenSq)
-        vel[a].add(f)
-        vel[b].sub(f)
-      }
-    }
-    layoutEdges.forEach(({ source_node_uuid: s, target_node_uuid: t }) => {
-      const diff = pos[t].clone().sub(pos[s])
-      const f = diff.multiplyScalar(0.045)
-      vel[s].add(f)
-      vel[t].sub(f)
-    })
-    uuids.forEach(id => {
-      vel[id].multiplyScalar(0.82)
-      pos[id].add(vel[id])
-    })
-  }
+  // ── Build scene objects ──────────────────────────────────────────────
 
+  // Node meshes
   threeNodes3D = nodesData.map(n => {
     const type = n.labels?.find(l => l !== 'Entity') || 'Entity'
     const col = getColor3(type)
@@ -585,7 +565,14 @@ const renderGraph3D = async () => {
     return { mesh, label, rawData: n }
   })
 
+  // Build a lookup: uuid → threeNodes3D entry
+  const nodeMeshMap = {}
+  threeNodes3D.forEach(n => { nodeMeshMap[n.rawData.uuid] = n })
+
+  // Edge lines (dynamic — positions updated every frame)
+  const edgeLines = []
   const doneSelfLoops = new Set()
+
   edgesData
     .filter(e => nodeIds.has(e.source_node_uuid) && nodeIds.has(e.target_node_uuid))
     .forEach(e => {
@@ -597,16 +584,89 @@ const renderGraph3D = async () => {
         const ring = new THREE.Mesh(geo, mat)
         ring.position.copy(pos[e.source_node_uuid])
         threeScene.add(ring)
+        edgeLines.push({ type: 'ring', mesh: ring, sourceId: e.source_node_uuid })
         return
       }
-      const sp = pos[e.source_node_uuid]
-      const tp = pos[e.target_node_uuid]
-      if (!sp || !tp) return
-      const geo = new THREE.BufferGeometry().setFromPoints([sp.clone(), tp.clone()])
+      // Use a line with 2 points that we update every tick
+      const points = [
+        pos[e.source_node_uuid].clone(),
+        pos[e.target_node_uuid].clone()
+      ]
+      const geo = new THREE.BufferGeometry().setFromPoints(points)
       const mat = new THREE.LineBasicMaterial({ color: 0xB0B0B0, transparent: true, opacity: 0.65 })
-      threeScene.add(new THREE.Line(geo, mat))
+      const line = new THREE.Line(geo, mat)
+      threeScene.add(line)
+      edgeLines.push({ type: 'line', line, geo, sourceId: e.source_node_uuid, targetId: e.target_node_uuid })
     })
 
+  // ── Force simulation state ───────────────────────────────────────────
+  let alpha = 1.0           // simulation "heat" — starts hot, cools down
+  const alphaDecay = 0.02   // how fast it cools (lower = longer animation)
+  const alphaMin = 0.001    // stop threshold
+
+  const tickForce = () => {
+    if (alpha < alphaMin) return
+
+    alpha *= (1 - alphaDecay)
+
+    // Repulsion between every pair
+    for (let i = 0; i < uuids.length; i++) {
+      for (let j = i + 1; j < uuids.length; j++) {
+        const a = uuids[i], b = uuids[j]
+        const diff = pos[a].clone().sub(pos[b])
+        const lenSq = Math.max(diff.lengthSq(), 1)
+        const strength = (9000 / lenSq) * alpha
+        const f = diff.normalize().multiplyScalar(strength)
+        vel[a].add(f)
+        vel[b].sub(f)
+      }
+    }
+
+    // Attraction along edges
+    layoutEdges.forEach(({ source_node_uuid: s, target_node_uuid: t }) => {
+      const diff = pos[t].clone().sub(pos[s])
+      const f = diff.multiplyScalar(0.045 * alpha)
+      vel[s].add(f)
+      vel[t].sub(f)
+    })
+
+    // Centering force — keeps graph from drifting off screen
+    uuids.forEach(id => {
+      vel[id].add(pos[id].clone().multiplyScalar(-0.01 * alpha))
+    })
+
+    // Integrate velocities → positions
+    uuids.forEach(id => {
+      vel[id].multiplyScalar(0.82)
+      pos[id].add(vel[id])
+    })
+
+    // Sync mesh positions with physics positions
+    threeNodes3D.forEach(({ mesh, label, rawData }) => {
+      const p = pos[rawData.uuid]
+      if (!p) return
+      mesh.position.copy(p)
+      label.position.copy(p).add(new THREE.Vector3(13, 11, 0))
+    })
+
+    // Sync edge line endpoints
+    edgeLines.forEach(e => {
+      if (e.type === 'line') {
+        const sp = pos[e.sourceId]
+        const tp = pos[e.targetId]
+        if (!sp || !tp) return
+        const positions = e.geo.attributes.position
+        positions.setXYZ(0, sp.x, sp.y, sp.z)
+        positions.setXYZ(1, tp.x, tp.y, tp.z)
+        positions.needsUpdate = true
+      } else if (e.type === 'ring') {
+        const p = pos[e.sourceId]
+        if (p) e.mesh.position.copy(p)
+      }
+    })
+  }
+
+  // ── Event handlers ───────────────────────────────────────────────────
   const canvas = graphCanvas.value
   let dragMoved = false
 
@@ -649,8 +709,10 @@ const renderGraph3D = async () => {
 
   updateCam()
 
+  // ── Render + physics loop ────────────────────────────────────────────
   const animate = () => {
     threeAnimFrameId = requestAnimationFrame(animate)
+    tickForce()   // advance physics one step per frame
     if (threeRenderer && threeScene && threeCamera) {
       threeRenderer.render(threeScene, threeCamera)
     }
