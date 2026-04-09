@@ -194,7 +194,7 @@ const props = defineProps({
 const emit = defineEmits(['completed'])
 
 // ─── State ────────────────────────────────────────────────────────────────────
-//const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001'
 const API = (path) => `${BASE_URL}/api${path}`
 
 const docRef          = ref(null)
@@ -222,6 +222,7 @@ const reportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', mon
 let statusPollTimer  = null   // polls /generate/status while task pending
 let sectionPollTimer = null   // polls /sections while report building
 let agentLogTimer    = null   // polls /agent-log for live activity
+let progressPollTimer = null  // polls /progress every 2s (catches completion from file)
 
 // ─── Computed ─────────────────────────────────────────────────────────────────
 function isSectionDone(idx) { return !!generatedSections.value[idx] }
@@ -291,6 +292,8 @@ async function beginReport() {
     statusPollTimer = setInterval(pollGenerateStatus, 4000)
     // Also start polling agent log so the user sees live activity
     agentLogTimer = setInterval(pollAgentLog, 3000)
+    // Poll /progress every 2s for live file-based status (catches completion faster)
+    progressPollTimer = setInterval(pollProgress, 2000)
 
   } catch (e) {
     errorMsg.value = `Failed to start report: ${e.message}`
@@ -316,14 +319,15 @@ async function pollGenerateStatus() {
 
     if (d.status === 'completed' || d.already_completed) {
       clearInterval(statusPollTimer)
+      clearInterval(progressPollTimer)
       statusPollTimer = null
-      if (!reportOutline.value) {
-        // Report finished — load it
-        await loadExistingReport(d.report_id || activeReportId.value)
-      }
+      progressPollTimer = null
+      // Always load the report — don't gate on reportOutline being null
+      await loadExistingReport(d.report_id || activeReportId.value)
       isGenerating.value = false
     } else if (d.status === 'failed') {
       clearInterval(statusPollTimer)
+      clearInterval(progressPollTimer)
       errorMsg.value = `Report generation failed: ${d.message || 'Unknown error'}`
       isGenerating.value = false
     }
@@ -340,11 +344,12 @@ async function loadExistingReport(reportId) {
     if (!resp.success) throw new Error(resp.error)
     const r = resp.data
 
-    // Build outline from report data
+    // Build outline from report data — backend nests sections under outline
+    const outlineData = r.outline || r
     reportOutline.value = {
-      title:   r.title || 'Prediction Report',
-      summary: r.summary || r.executive_summary || '',
-      sections: (r.sections || []).map((s) => ({
+      title:   outlineData.title || r.title || 'Prediction Report',
+      summary: outlineData.summary || r.summary || r.executive_summary || '',
+      sections: ((outlineData.sections) || r.sections || []).map((s) => ({
         title: typeof s === 'string' ? s : (s.title || s.name || `Section ${s.index || ''}`),
         desc:  typeof s === 'string' ? '' : (s.description || ''),
         index: typeof s === 'object' ? (s.index || 0) : 0,
@@ -356,9 +361,12 @@ async function loadExistingReport(reportId) {
       reportOutline.value.sections = [{ title: 'Full Report', desc: '', index: 1 }]
     }
 
-    // Start polling individual sections
-    sectionPollTimer = setInterval(() => pollSections(reportId), 3000)
-    await pollSections(reportId)  // immediate
+    // Immediate poll first — if already complete this will set isComplete and clear timers
+    await pollSections(reportId)
+    // Only start the interval if not already complete
+    if (!isComplete.value) {
+      sectionPollTimer = setInterval(() => pollSections(reportId), 3000)
+    }
   } catch (e) {
     errorMsg.value = `Failed to load report: ${e.message}`
   }
@@ -389,13 +397,15 @@ async function pollSections(reportId) {
       writingPreview.value = last.slice(0, 80)
     }
 
-    if (resp.data.is_complete && !wasComplete) {
+    if (resp.data.is_complete) {
       clearInterval(sectionPollTimer)
       clearInterval(agentLogTimer)
+      clearInterval(progressPollTimer)
+      sectionPollTimer = null
       currentSectionIdx.value = 0
       writingPreview.value = ''
       isComplete.value = true
-      // Fetch final token count from report metadata
+      isGenerating.value = false
       fetchTokenCount(reportId)
     }
   } catch (e) {
@@ -413,6 +423,28 @@ async function pollAgentLog() {
     if (lines.length) {
       lastAgentLogLine.value += lines.length
       agentLogLines.value = [...agentLogLines.value, ...lines].slice(-50)
+    }
+  } catch (e) { /* silent */ }
+}
+
+// Poll /progress every 2s — reads the file-based progress.json which updates in real time
+// This catches completion faster than the task-status poll (every 4s)
+async function pollProgress() {
+  if (!activeReportId.value || isComplete.value) return
+  try {
+    const resp = await apiFetch(API(`/report/${activeReportId.value}/progress`))
+    if (!resp.success) return
+    const p = resp.data
+    if (p.progress) generateProgress.value = p.progress
+    if (p.message) generatingMsg.value = p.message
+    // If progress.json says completed and we haven't loaded yet, load immediately
+    if (p.status === 'completed' && !isComplete.value) {
+      clearInterval(progressPollTimer)
+      clearInterval(statusPollTimer)
+      progressPollTimer = null
+      statusPollTimer = null
+      await loadExistingReport(activeReportId.value)
+      isGenerating.value = false
     }
   } catch (e) { /* silent */ }
 }
@@ -467,6 +499,7 @@ function clearTimers() {
   clearInterval(statusPollTimer)
   clearInterval(sectionPollTimer)
   clearInterval(agentLogTimer)
+  clearInterval(progressPollTimer)
 }
 
 onUnmounted(clearTimers)

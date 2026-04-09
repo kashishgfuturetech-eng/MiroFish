@@ -4,6 +4,7 @@ Step2: Zep entity reading & filtering, OASIS simulation preparation & execution 
 """
 
 import os
+import json
 import traceback
 from flask import request, jsonify, send_file
 
@@ -745,6 +746,145 @@ def get_prepare_status():
             "success": False,
             "error": str(e)
         }), 500
+
+
+@simulation_bp.route('/configure', methods=['POST'])
+def configure_simulation():
+    """
+    Save simulation configuration after agent personas are generated.
+
+    Expected JSON body:
+    {
+        "simulation_id":   "sim_xxxxxxxxxxxx",
+        "duration_hours":  72,
+        "max_rounds":      100,
+        "active_start":    "09:00",
+        "active_end":      "22:00",
+        "agent_count":     50,
+        "platform":        "reddit",   // "reddit" | "twitter"
+        "algorithm":       "default"
+    }
+
+    Returns:
+    {
+        "success": true,
+        "data": { "simulation_id": "...", "message": "Configuration saved." }
+    }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        simulation_id = data.get('simulation_id', '').strip()
+
+        if not simulation_id:
+            return jsonify({"success": False, "error": "simulation_id is required"}), 400
+
+        manager = SimulationManager()
+        state = manager.get_simulation(simulation_id)
+        if state is None:
+            return jsonify({"success": False, "error": f"Simulation not found: {simulation_id}"}), 404
+
+        sim_dir = manager._get_simulation_dir(simulation_id)
+        config_path = os.path.join(sim_dir, "simulation_config.json")
+
+        # Load existing config if already generated, otherwise start from an empty dict
+        existing_config: dict = {}
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                existing_config = json.load(f)
+
+        # ── Parse active-hours into integer lists ──────────────────────────────
+        def _parse_hour(val, fallback: int) -> int:
+            """Accept '09:00', '9', 9 → integer hour."""
+            try:
+                if isinstance(val, str) and ':' in val:
+                    return int(val.split(':')[0])
+                return int(val)
+            except (TypeError, ValueError):
+                return fallback
+
+        active_start_h = _parse_hour(data.get('active_start'), 9)
+        active_end_h   = _parse_hour(data.get('active_end'),   22)
+
+        # Build active-hours list, e.g. [9,10,...,21]
+        if active_start_h < active_end_h:
+            active_hours = list(range(active_start_h, active_end_h))
+        else:
+            # Wrap around midnight
+            active_hours = list(range(active_start_h, 24)) + list(range(0, active_end_h))
+
+        # ── Merge user overrides into time_config ──────────────────────────────
+        time_config: dict = existing_config.get('time_config', {})
+
+        if data.get('duration_hours') is not None:
+            time_config['total_simulation_hours'] = int(data['duration_hours'])
+
+        if data.get('max_rounds') is not None:
+            # Store as minutes_per_round: total_hours*60 / max_rounds
+            try:
+                total_minutes = time_config.get('total_simulation_hours', 72) * 60
+                time_config['minutes_per_round'] = max(1, total_minutes // int(data['max_rounds']))
+            except (ZeroDivisionError, TypeError):
+                pass
+
+        # Update peak / off-peak hours based on active window
+        time_config['peak_hours'] = [h for h in active_hours if h >= 19 or h < 1]
+        if not time_config['peak_hours']:
+            # Fallback: last quarter of the active window is "peak"
+            mid = len(active_hours) * 3 // 4
+            time_config['peak_hours'] = active_hours[mid:] or active_hours
+
+        time_config['off_peak_hours'] = [h for h in range(24) if h not in active_hours]
+
+        existing_config['time_config'] = time_config
+
+        # ── Agent count ────────────────────────────────────────────────────────
+        if data.get('agent_count') is not None:
+            try:
+                ac = int(data['agent_count'])
+                existing_config['agent_count'] = ac
+                # Also propagate into per-agent configs if present
+                agent_configs = existing_config.get('agent_configs', [])
+                if agent_configs:
+                    # Trim or extend list length to match agent_count (best-effort)
+                    if len(agent_configs) > ac:
+                        existing_config['agent_configs'] = agent_configs[:ac]
+            except (TypeError, ValueError):
+                pass
+
+        # ── Platform override ──────────────────────────────────────────────────
+        platform = data.get('platform', '').strip().lower()
+        if platform in ('reddit', 'twitter'):
+            existing_config['platform'] = platform
+
+        # ── Algorithm hint (stored for runner to read) ─────────────────────────
+        algorithm = data.get('algorithm', '').strip()
+        if algorithm:
+            existing_config['algorithm'] = algorithm
+
+        # ── Persist ───────────────────────────────────────────────────────────
+        existing_config['configured_at'] = __import__('datetime').datetime.now().isoformat()
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(existing_config, f, ensure_ascii=False, indent=2)
+
+        # Mark state as configured
+        state.config_generated = True
+        manager._save_simulation_state(state)
+
+        logger.info(f"Simulation configured: {simulation_id}, platform={platform or 'unchanged'}, "
+                    f"duration={data.get('duration_hours')}h, agents={data.get('agent_count')}")
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "simulation_id": simulation_id,
+                "message": "Configuration saved successfully.",
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to configure simulation: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @simulation_bp.route('/<simulation_id>', methods=['GET'])

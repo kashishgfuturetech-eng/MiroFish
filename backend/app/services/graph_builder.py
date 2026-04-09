@@ -186,7 +186,7 @@ class GraphBuilderService:
     
     def create_graph(self, name: str) -> str:
         """Create Zep graph (public method)"""
-        graph_id = f"mirofish_{uuid.uuid4().hex[:16]}"
+        graph_id = f"predly_{uuid.uuid4().hex[:16]}"
         
         self.client.graph.create(
             graph_id=graph_id,
