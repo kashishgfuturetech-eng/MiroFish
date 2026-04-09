@@ -8,7 +8,21 @@
           <span class="label-sm" style="color:var(--text-muted)">Simulation Report</span>
         </div>
 
-        <div v-if="reportSummary" class="interact__ref-content">
+        <!-- Loading state -->
+        <div v-if="reportLoading" class="interact__ref-empty">
+          <div class="ai-chip">
+            <span class="ai-chip-dot"></span>
+            <span class="label-sm" style="color:var(--secondary)">Loading report…</span>
+          </div>
+        </div>
+
+        <!-- Error state -->
+        <div v-else-if="reportError" class="interact__ref-empty">
+          <span class="material-symbols-outlined" style="font-size:18px;color:#f87171">error</span>
+          <span class="label-sm" style="color:#f87171">{{ reportError }}</span>
+        </div>
+
+        <div v-else-if="reportSummary" class="interact__ref-content">
           <div class="interact__ref-meta">
             <span class="chip chip-orange">Prediction Report</span>
             <span class="font-mono label-sm" style="color:var(--text-muted)">{{ reportId }}</span>
@@ -159,48 +173,102 @@
 import { ref, nextTick, onMounted } from 'vue'
 
 const props = defineProps({
-  reportId: { type: String, default: 'REF-2024-X92' },
+  reportId:     { type: String, default: null },
+  simulationId: { type: String, default: null },
 })
 
-const messagesRef = ref(null)
-const inputText = ref('')
-const messages = ref([])
-const isTyping = ref(false)
-const contextChips = ref([])
+// ─── API ──────────────────────────────────────────────────────────────────────
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+const API = (path) => `${BASE_URL}/api${path}`
+
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options })
+  const json = await res.json().catch(() => ({ error: res.statusText }))
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+  return json
+}
+
+// ─── State ────────────────────────────────────────────────────────────────────
+const messagesRef      = ref(null)
+const inputText        = ref('')
+const messages         = ref([])
+const isTyping         = ref(false)
+const contextChips     = ref([])
 const activeSectionRef = ref(null)
+const reportSummary    = ref(null)
+const reportError      = ref('')
+const reportLoading    = ref(false)
 
-const reportSummary = ref({
-  title: 'Emergent Social Dynamics: Predictive Intelligence Report',
-  summary: 'Analysis of autonomous agent behavior reveals significant clustering around key opinion leaders, with 73% of information cascades originating from fewer than 8% of agents.',
-  sections: [
-    { title: 'Executive Summary' },
-    { title: 'Information Cascade Patterns' },
-    { title: 'Key Opinion Leader Identification' },
-    { title: 'Sentiment Trajectory Analysis' },
-    { title: 'Cross-Platform Dynamics' },
-    { title: 'Predictive Scenarios' },
-    { title: 'Recommendations' },
-  ],
+// Full report text injected as system context on every AI call
+const reportContext = ref('')
+
+// ─── Load real report on mount ────────────────────────────────────────────────
+onMounted(async () => {
+  if (!props.reportId || props.reportId === 'REF-PENDING') return
+  reportLoading.value = true
+  try {
+    // Fetch report outline and written sections in parallel
+    const [reportResp, sectionsResp] = await Promise.all([
+      apiFetch(API(`/report/${props.reportId}`)),
+      apiFetch(API(`/report/${props.reportId}/sections`)).catch(() => null),
+    ])
+
+    if (!reportResp.success) throw new Error(reportResp.error || 'Failed to load report')
+    const r = reportResp.data
+    const outlineData = r.outline || r
+
+    // Build sidebar summary
+    reportSummary.value = {
+      title:    outlineData.title   || r.title   || 'Prediction Report',
+      summary:  outlineData.summary || r.summary || r.executive_summary || '',
+      sections: ((outlineData.sections) || r.sections || []).map((s) => ({
+        title: typeof s === 'string' ? s : (s.title || s.name || 'Section'),
+      })),
+    }
+
+    // Index written section content from /sections (keyed by section_index)
+    const writtenSections = {}
+    if (sectionsResp?.success) {
+      ;(sectionsResp.data?.sections || []).forEach((sec) => {
+        const idx = sec.section_index
+          || parseInt((sec.filename || '').match(/\d+/)?.[0] || '0')
+        if (idx && sec.content) writtenSections[idx] = sec.content
+      })
+    }
+
+    // Build full report text for AI context — outline titles + written content
+    const outlineSections = outlineData.sections || r.sections || []
+    const sectionLines = outlineSections.map((s, i) => {
+      const title   = typeof s === 'string' ? s : (s.title || s.name || `Section ${i + 1}`)
+      const content = writtenSections[i + 1]
+        || (typeof s === 'object' ? (s.content || s.body || '') : '')
+      return `## ${title}\n${content}`
+    })
+
+    reportContext.value = [
+      `# ${reportSummary.value.title}`,
+      reportSummary.value.summary,
+      ...sectionLines,
+    ].join('\n\n')
+
+  } catch (e) {
+    reportError.value = `Could not load report: ${e.message}`
+  } finally {
+    reportLoading.value = false
+  }
 })
 
+// ─── Suggestions ─────────────────────────────────────────────────────────────
 const suggestions = [
-  'Which agent had the most influence on information cascades?',
-  'What would happen if Agent_007 was removed from the simulation?',
-  'Summarize the cross-platform dynamics in simple terms',
-  'What were the main sentiment turning points?',
-  'Generate a hypothetical scenario where 3 KOLs coordinate messaging',
-  'Which agents showed the most adaptive behavior over time?',
+  'Give me an executive summary of the simulation findings.',
+  'Which agents had the most influence on information cascades?',
+  'What were the key sentiment turning points in the simulation?',
+  'Summarize the cross-platform dynamics in simple terms.',
+  'What are the top recommendations from this report?',
+  'What would you consider the most surprising finding?',
 ]
 
-const demoResponses = [
-  'Based on the simulation data, **Agent_007** emerged as the highest-influence node with a betweenness centrality score of **0.73**. This agent was active across both Info Plaza and Topic Community, acting as a critical bridge node. Approximately **31% of all cascades** passed through this agent at some point in their propagation chain.\n\nKey behavioral traits observed:\n- Consistently responded to low-engagement content within 2 rounds\n- Maintained positive sentiment framing even during Phase 2 polarization\n- Cross-posted 67% of content across both platforms',
-  'Running a counterfactual model with Agent_007 removed from the simulation:\n\n**Predicted outcomes:**\n- Overall cascade velocity decreases by **41%**\n- Cross-platform amplification drops from 2.3× to 1.4×\n- Information ecosystem fragments into 2–3 isolated clusters by round 600\n- Phase 2 polarization extends from rounds 300–800 to potentially 300–1,100\n\nThe void left by Agent_007 would likely be partially filled by Agents 023 and 041, but their combined reach only covers **58%** of Agent_007\'s network position.',
-  'Cross-platform dynamics in simple terms:\n\n**Info Plaza** (Twitter-like) is where ideas are **born** — rapid, short-form content spreads quickly but dies fast. Think of it as the spark.\n\n**Topic Community** (Reddit-like) is where ideas are **refined** — longer discussions add depth and credibility. Think of it as the fuel.\n\n**Bridge agents** (active on both) are the **match** — they carry validated ideas from Topic Community back to Info Plaza, triggering second-wave amplification that\'s typically 2.3× stronger than the original cascade.',
-  'The simulation shows three distinct **sentiment turning points**:\n\n1. **Round 78** — Initial optimism peaks (+0.41 valence) as early content resonates broadly\n2. **Round 423** — Sharp negativity spike (valence -0.28) triggered by information scarcity and KOL conflict\n3. **Round 847** — Synthetic consensus emerges (+0.38 valence) as echo chambers stabilize around shared narratives\n\nThe Phase 2 dip (Round 300–800) represents the highest opportunity window for narrative intervention with minimum resource cost.',
-]
-
-let responseIndex = 0
-
+// ─── Chat ─────────────────────────────────────────────────────────────────────
 function getTime() {
   const d = new Date()
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
@@ -209,19 +277,47 @@ function getTime() {
 async function sendMessage(text) {
   if (!text.trim() || isTyping.value) return
 
+  const chipContext = contextChips.value.length
+    ? `\n\n[Focus areas: ${contextChips.value.join(', ')}]`
+    : ''
+
   messages.value.push({ role: 'user', content: text, time: getTime() })
   inputText.value = ''
+  contextChips.value = []
   await scrollToBottom()
 
   isTyping.value = true
-  await new Promise(r => setTimeout(r, 1200 + Math.random() * 800))
 
-  const response = demoResponses[responseIndex % demoResponses.length]
-  responseIndex++
+  try {
+    // Conversation history (strip timestamps — AI doesn't need them)
+    const history = messages.value
+      .slice(0, -1)
+      .map(m => ({ role: m.role, content: m.content }))
 
-  isTyping.value = false
-  messages.value.push({ role: 'assistant', content: response, time: getTime() })
-  await scrollToBottom()
+    // ✅ Use existing /api/report/chat — ReportAgent with full simulation context
+    const resp = await apiFetch(API('/report/chat'), {
+      method: 'POST',
+      body: JSON.stringify({
+        simulation_id: props.simulationId,
+        message: text + chipContext,
+        chat_history: history,
+      }),
+    })
+
+    const reply = resp.data?.response || resp.data?.content
+      || 'Sorry, I could not generate a response. Please try again.'
+
+    messages.value.push({ role: 'assistant', content: reply, time: getTime() })
+  } catch (e) {
+    messages.value.push({
+      role: 'assistant',
+      content: `**Error:** ${e.message}`,
+      time: getTime(),
+    })
+  } finally {
+    isTyping.value = false
+    await scrollToBottom()
+  }
 }
 
 function sendCurrentMessage() { sendMessage(inputText.value) }
@@ -237,10 +333,12 @@ async function scrollToBottom() {
   }
 }
 
-function clearChat() { messages.value = []; responseIndex = 0 }
+function clearChat() { messages.value = [] }
 
 function addContextChip() {
-  const tags = ['KOL Analysis', 'Phase 2', 'Info Plaza', 'Agent_007', 'Cascades', 'Sentiment']
+  const tags = reportSummary.value?.sections?.map(s => s.title) || [
+    'KOL Analysis', 'Sentiment', 'Cascades', 'Cross-Platform', 'Recommendations',
+  ]
   const available = tags.filter(t => !contextChips.value.includes(t))
   if (available.length) contextChips.value.push(available[0])
 }

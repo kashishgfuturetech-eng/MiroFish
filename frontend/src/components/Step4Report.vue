@@ -182,7 +182,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 // simulationId: Required — the sim_xxxx from Step 3
@@ -390,14 +390,15 @@ async function pollSections(reportId) {
       }
     })
 
-    // Also show typing animation for the current "in-progress" section
-    // (section not yet done — show last few chars of agent log as preview)
     if (agentLogLines.value.length) {
       const last = agentLogLines.value[agentLogLines.value.length - 1] || ''
-      writingPreview.value = last.slice(0, 80)
+      writingPreview.value = String(last).slice(0, 80)
     }
 
-    if (resp.data.is_complete) {
+    const allSectionsLoaded = reportOutline.value &&
+      Object.keys(generatedSections.value).length >= reportOutline.value.sections.length
+
+    if (resp.data.is_complete || allSectionsLoaded) {
       clearInterval(sectionPollTimer)
       clearInterval(agentLogTimer)
       clearInterval(progressPollTimer)
@@ -407,6 +408,7 @@ async function pollSections(reportId) {
       isComplete.value = true
       isGenerating.value = false
       fetchTokenCount(reportId)
+      // Do NOT emit('completed') here — the "Open Interaction" button handles navigation
     }
   } catch (e) {
     console.warn('pollSections error:', e.message)

@@ -61,6 +61,17 @@
           @completed="onStepCompleted('report', {})"
         />
 
+        <!--
+          Step 5: Interaction
+          Props:
+            report-id      — passed so the chat panel can reference the correct report
+        -->
+        <Step5Interaction
+          v-else-if="currentStep === 'interaction'"
+          :report-id="projectData.report_id || 'REF-PENDING'"
+          :simulation-id="projectData.simulation_id || null"
+        />
+
         <!-- Fallback placeholder -->
         <div v-else class="main-view__placeholder">
           <span class="material-symbols-outlined" style="font-size:48px;color:var(--text-muted)">account_tree</span>
@@ -82,8 +93,9 @@ import TopNav from '../components/TopNav.vue'
 import SideNav from '../components/SideNav.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
-import Step3Simulation from '../components/Step3Simulation.vue'   // ← NEW
-import Step4Report from '../components/Step4Report.vue'           // ← NEW
+import Step3Simulation from '../components/Step3Simulation.vue'
+import Step4Report from '../components/Step4Report.vue'
+import Step5Interaction from '../components/Step5Interaction.vue'  // ← NEW
 
 const props = defineProps({ projectId: String })
 const router = useRouter()
@@ -94,12 +106,13 @@ const completedSteps = ref([])
 /*
   projectData is the shared state that flows down through all steps.
   Each step's @completed event merges its returned data here.
-  
+
   Key fields populated by each step:
-    graph step  → graph_id, project_id (from Step1GraphBuild)
-    env step    → simulation_id        (from Step2EnvSetup after /api/simulation/create)
-    simulation  → (no new data needed — simulation_id already set)
-    report      → report_id            (Step4Report sets this internally via API)
+    graph step   → graph_id, project_id (from Step1GraphBuild)
+    env step     → simulation_id        (from Step2EnvSetup after /api/simulation/create)
+    simulation   → (no new data needed — simulation_id already set)
+    report       → report_id            (Step4Report sets this internally via API)
+    interaction  → (no new data needed — report_id already set)
 */
 const projectData = ref({
   project_id:    props.projectId || null,
@@ -109,26 +122,29 @@ const projectData = ref({
   ontology:      null,
 })
 
-const stepOrder = ['graph', 'env', 'simulation', 'report']
+const stepOrder = ['graph', 'env', 'simulation', 'report', 'interaction']  // ← added 'interaction'
 const stepIndex = computed(() => stepOrder.indexOf(currentStep.value))
 
 const stepTitles = {
-  graph:      'Graph Build & Ontology',
-  env:        'Environment Configuration',
-  simulation: 'Simulation Run',
-  report:     'Report Generation',
+  graph:       'Graph Build & Ontology',
+  env:         'Environment Configuration',
+  simulation:  'Simulation Run',
+  report:      'Report Generation',
+  interaction: 'AI Interaction',             // ← NEW
 }
 const stepHeadings = {
-  graph:      'Graph Build',
-  env:        'Env Setup',
-  simulation: 'Simulation',
-  report:     'Report',
+  graph:       'Graph Build',
+  env:         'Env Setup',
+  simulation:  'Simulation',
+  report:      'Report',
+  interaction: 'Interaction',                // ← NEW
 }
 const stepSubtitles = {
-  graph:      'Extract ontology structures, entity types, and relationships from your reality seeds.',
-  env:        'Define simulation parameters, agent personas, and recommendation logic.',
-  simulation: 'Launch parallel autonomous agents across Info Plaza and Topic Community.',
-  report:     'Generate AI-powered predictive intelligence from simulation data.',
+  graph:       'Extract ontology structures, entity types, and relationships from your reality seeds.',
+  env:         'Define simulation parameters, agent personas, and recommendation logic.',
+  simulation:  'Launch parallel autonomous agents across Info Plaza and Topic Community.',
+  report:      'Generate AI-powered predictive intelligence from simulation data.',
+  interaction: 'Query the Simulation Oracle to explore agent behaviors, emergent patterns, and hypothetical scenarios.',  // ← NEW
 }
 
 function navigateTo(step) {
